@@ -1,0 +1,2 @@
+# Ignore the .github directory (workflows, configs, etc.)
+.github/
