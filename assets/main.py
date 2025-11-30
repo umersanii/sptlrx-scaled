@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 
 # Configuration
-PLAYERS = ["edge", "chromium", "chrome", "firefox"]
+PLAYERS = ["firefox", "edge", "chromium", "chrome"]
 SCALED_LYRICS_DIR = Path.home() / ".cache" / "sptlrx-scaled"
 LOG_FILE = Path.home() / ".cache" / "sptlrx-scaled" / "debug.log"
 
@@ -163,18 +163,21 @@ def fetch_lyrics_lrclib(song, artist=None, expected_duration=None):
         try:
             resp = requests.get("https://lrclib.net/api/search", 
                               params={"track_name": song, "artist_name": artist}, 
-                              timeout=5)
+                              timeout=10)
             if resp.status_code == 200:
                 results = resp.json()
                 for r in results:
                     if r.get("syncedLyrics"):
                         track = r.get("trackName", "").lower().strip()
                         result_artist = r.get("artistName", "").lower().strip()
-                        # Check both track AND artist match
+                        # Check track matches (exact or without spaces)
                         track_matches = (track == song_lower or 
                                         track.replace(" ", "") == song_lower.replace(" ", ""))
+                        # Check artist matches (exact, without spaces, or contained within)
                         artist_matches = (result_artist == artist_lower or
-                                         result_artist.replace(" ", "") == artist_lower.replace(" ", ""))
+                                         result_artist.replace(" ", "") == artist_lower.replace(" ", "") or
+                                         artist_lower in result_artist or
+                                         result_artist in artist_lower)
                         if track_matches and artist_matches:
                             log(f"  ✓ Found lyrics by '{r.get('artistName')}'")
                             return {
@@ -183,8 +186,13 @@ def fetch_lyrics_lrclib(song, artist=None, expected_duration=None):
                                 "title": r.get("trackName"),
                                 "artist": r.get("artistName")
                             }
-        except:
-            pass
+                # If we got results but none matched our criteria, log it
+                if results:
+                    log(f"  ⚠️ API returned {len(results)} results but none matched exactly")
+        except requests.exceptions.Timeout:
+            log(f"  ⚠️ API timeout for '{song}' by '{artist}'")
+        except Exception as e:
+            log(f"  ⚠️ API error: {type(e).__name__}: {e}")
         # If artist was provided but no match found, return None
         # Let the caller try a different song/artist combination
         return None
@@ -360,6 +368,14 @@ def show_music_icon(message=""):
 def get_position():
     """Get current playback position in milliseconds."""
     try:
+        # First find which player is actually playing
+        cmd = ["playerctl", f"--player={','.join(PLAYERS)}", "status"]
+        status = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
+        
+        if status != "Playing":
+            return None
+        
+        # Get position from the active player
         cmd = ["playerctl", f"--player={','.join(PLAYERS)}", "position"]
         pos = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
         return int(float(pos) * 1000)  # Convert seconds to ms
