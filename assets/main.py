@@ -95,16 +95,27 @@ def parse_title(raw_title):
     - Artist - Song  OR  Song - Artist
     We don't know which, so caller should try both.
     """
-    # Remove YouTube Music suffix FIRST
-    title = re.sub(r'\s*-\s*YouTube Music$', '', raw_title)
+    # Convert fullwidth characters to ASCII (ｓｌｏｗｅｄ → slowed)
+    title = raw_title
+    fullwidth_to_ascii = str.maketrans(
+        'ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９　',
+        'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 '
+    )
+    title = title.translate(fullwidth_to_ascii)
     
-    # Remove slowed patterns - order matters!
+    # Remove YouTube Music suffix FIRST
+    title = re.sub(r'\s*-\s*YouTube Music$', '', title)
+    
+    # Remove EVERYTHING in parentheses and brackets (catches all variations)
+    title = re.sub(r'\s*\([^)]*\)', '', title)  # Remove (...)
+    title = re.sub(r'\s*\[[^\]]*\]', '', title)  # Remove [...]
+    title = re.sub(r'\s*\{[^}]*\}', '', title)   # Remove {...}
+    title = re.sub(r'\s*「[^」]*」', '', title)  # Remove Japanese quotes 「...」
+    title = re.sub(r'\s*『[^』]*』', '', title)  # Remove Japanese quotes 『...』
+    
+    # Remove slowed patterns that aren't in brackets
     # Handle "~ Slowed..." format (common on YT)
     title = re.sub(r'\s*~\s*(super\s*)?slowed.*$', '', title, flags=re.IGNORECASE)
-    # Handle "(Super Slowed...)" and "(Slowed...)" formats
-    title = re.sub(r'\s*\((super\s*)?slowed[^)]*\)', '', title, flags=re.IGNORECASE)
-    # Handle "[Super Slowed...]" and "[Slowed...]" formats  
-    title = re.sub(r'\s*\[(super\s*)?slowed[^\]]*\]', '', title, flags=re.IGNORECASE)
     # Handle "- Slowed..." at end
     title = re.sub(r'\s*-\s*(super\s*)?slowed.*$', '', title, flags=re.IGNORECASE)
     # Handle standalone "Slowed and Reverb" or "Super Slowed + Reverb"
@@ -112,21 +123,26 @@ def parse_title(raw_title):
     # Handle "Slowed Version"
     title = re.sub(r'\s*(super\s*)?slowed\s*version.*$', '', title, flags=re.IGNORECASE)
     # Handle "sped down" and "pitched down"
-    title = re.sub(r'\s*\(?(sped|pitched)\s*down\)?.*$', '', title, flags=re.IGNORECASE)
+    title = re.sub(r'\s*(sped|pitched)\s*down.*$', '', title, flags=re.IGNORECASE)
+    
+    # Remove non-ASCII characters that are likely junk (like 中ジ芋)
+    # But keep common punctuation and accented letters
+    title = re.sub(r'[^\x00-\x7F\u00C0-\u024F]+', '', title)
     
     # Clean up trailing separators and spaces
-    title = re.sub(r'\s*[~\-|]\s*$', '', title)
+    title = re.sub(r'\s*[~\-|／/]\s*$', '', title)
     title = re.sub(r'\s+', ' ', title).strip()
     
-    # Try to split into two parts
-    # Common separators: " - ", " ~ ", " | "
+    # Try to split into two parts using various separators
+    # Common separators: " - ", "- ", " -", " ~ ", " | ", " － " (fullwidth)
     part1 = None
     part2 = title
     
-    for sep in [' - ', ' ~ ', ' | ']:
+    # Try separators in order of preference (most specific first)
+    for sep in [' - ', ' － ', ' ~ ', ' | ', '- ', ' -', '－', ' / ', '／']:
         if sep in title:
             parts = title.split(sep, 1)
-            if len(parts) == 2:
+            if len(parts) == 2 and parts[0].strip() and parts[1].strip():
                 part1 = parts[0].strip()
                 part2 = parts[1].strip()
                 break
