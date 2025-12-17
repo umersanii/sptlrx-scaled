@@ -8,8 +8,10 @@ Built as an alternative to [sptlrx](https://github.com/raitonoberu/sptlrx) with 
 
 ![Demo](https://img.shields.io/badge/status-works%20on%20my%20machine-brightgreen)
 
-![Recording](assets/recording.gif)
-![No_Lyrics](assets/no_lyrics.gif)
+|  |
+| :--- |
+| ![Lyrics](assets/lyrics.gif) |
+| ![No_Lyrics](assets/no_lyrics.gif) |
 
 *Cigarettes After Sex - Heavenly (slowed + reverb) in action*
 
