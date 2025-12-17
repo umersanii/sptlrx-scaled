@@ -14,12 +14,27 @@ import time
 import signal
 import requests
 import shutil
+import random
 from pathlib import Path
 
 # Configuration
 PLAYERS = ["firefox", "edge", "chromium", "chrome"]
 SCALED_LYRICS_DIR = Path.home() / ".cache" / "sptlrx-scaled"
 LOG_FILE = Path.home() / ".cache" / "sptlrx-scaled" / "debug.log"
+
+# Phrases for when no lyrics are found
+NO_LYRICS_PHRASES = [
+    "No lyrics found...",
+    "Searching for words...",
+    "Instrumental maybe?",
+    "Lyrics unavailable...",
+    "Just vibes...",
+    "Decryption failed...",
+    "Signal lost...",
+    "Silence is golden...",
+    "Words are missing...",
+    "Enjoy the music...",
+]
 
 def log(msg):
     """Write message to log file."""
@@ -365,6 +380,40 @@ def show_music_icon(message=""):
     
     sys.stdout.flush()
 
+def show_nms_animation(message=None):
+    """
+    Display a random 'no lyrics' message using nms (No More Secrets) effect.
+    """
+    import shutil as sh
+    
+    if not message:
+        message = random.choice(NO_LYRICS_PHRASES)
+        
+    cols, rows = sh.get_terminal_size((80, 24))
+    
+    # Clear screen
+    sys.stdout.write("\033[2J\033[H\033[?25l")
+    sys.stdout.flush()
+    
+    # Calculate padding for centering
+    # We use newlines for vertical padding and spaces for horizontal
+    # This ensures centering even if nms clears screen or resets cursor
+    pad_top = rows // 2
+    pad_left = max(0, (cols - len(message)) // 2)
+    
+    full_content = "\n" * pad_top + " " * pad_left + message
+    
+    try:
+        # Run nms with auto-decrypt (-a) and foreground color white (-f white)
+        # We pass input directly via stdin to avoid echo's newline
+        p = subprocess.Popen(['nms', '-a', '-f', 'white'], stdin=subprocess.PIPE, stdout=sys.stdout)
+        p.communicate(input=full_content.encode())
+    except FileNotFoundError:
+        # Fallback if nms is not installed
+        # Manually position and print
+        sys.stdout.write(f"\033[{pad_top + 1};{pad_left + 1}H{message}")
+        sys.stdout.flush()
+
 def get_position():
     """Get current playback position in milliseconds."""
     try:
@@ -662,14 +711,41 @@ def main():
                         last_title = None
                         time.sleep(1)
                 else:
-                    # No lyrics found - show fallback icon
-                    log("No lyrics - showing fallback")
-                    fallback_mode = True
+                    # No lyrics found - loop nms animation
+                    log("No lyrics - starting nms loop")
+                    while True:
+                        # Check for song change BEFORE animation
+                        new_meta = get_metadata()
+                        if not new_meta or new_meta['title'] != current_title:
+                            break
+                            
+                        show_nms_animation()
+                        
+                        # Wait a bit to let the user read the text, while checking for song changes
+                        # Wait 2 seconds (20 * 0.1s)
+                        song_changed = False
+                        for _ in range(20):
+                            time.sleep(0.1)
+                            new_meta = get_metadata()
+                            if not new_meta or new_meta['title'] != current_title:
+                                song_changed = True
+                                break
+                        
+                        if song_changed:
+                            break
             
-            # If in fallback mode, show the icon and wait
-            if fallback_mode:
-                show_music_icon("Lyrics not available")
-                time.sleep(1)
+            # If in fallback mode (no lyrics found previously), keep showing nms occasionally or just wait
+            # But the user wants it to "keep searching for the next song"
+            # The loop above handles song changes.
+            # If we are here, it means we either just finished the animation or we are looping
+            # We don't want to spam nms, maybe just once per song?
+            # The current logic sets fallback_mode=True only if no lyrics found.
+            
+            # Let's adjust the logic slightly:
+            # If lyrics not found, we showed nms once.
+            # Now we just wait for song change.
+            
+            time.sleep(0.1)
             
     except KeyboardInterrupt:
         pass

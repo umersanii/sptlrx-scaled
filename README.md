@@ -147,6 +147,7 @@ Tested on:
 
 - Inspired by [sptlrx](https://github.com/raitonoberu/sptlrx) by [@raitonoberu](https://github.com/raitonoberu)
 - Lyrics provided by [lrclib.net](https://lrclib.net)
+- Decryption effect by [no-more-secrets](https://github.com/bartobri/no-more-secrets)
 
 ## License
 

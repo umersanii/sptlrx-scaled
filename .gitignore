@@ -1,2 +1,4 @@
 # Ignore the .github directory (workflows, configs, etc.)
 .github/
+assets/__pycache__
+sync.sh
