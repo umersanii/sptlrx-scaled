@@ -10,7 +10,7 @@ Built as an alternative to [sptlrx](https://github.com/raitonoberu/sptlrx) with 
 
 |  |
 | :--- |
-| ![Lyrics](assets/lyrics.gif) |
+| ![Lyrics](assets/output.gif) |
 | ![No_Lyrics](assets/no_lyrics.gif) |
 
 *Cigarettes After Sex - Heavenly (slowed + reverb) in action*

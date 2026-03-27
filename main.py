@@ -15,12 +15,36 @@ import signal
 import requests
 import shutil
 import random
+import colorsys
 from pathlib import Path
 
 # Configuration
 PLAYERS = ["firefox", "edge", "chromium", "chrome"]
 SCALED_LYRICS_DIR = Path.home() / ".cache" / "sptlrx-scaled"
 LOG_FILE = Path.home() / ".cache" / "sptlrx-scaled" / "debug.log"
+KEY_COLOR_FILE = "/tmp/cava-key-color"
+
+
+# ── theme helpers ─────────────────────────────────────────────────────────────
+
+def get_theme_rgb():
+    """Read key color written by cava-colors daemon. Returns (r,g,b) 0-255."""
+    try:
+        hex6 = Path(KEY_COLOR_FILE).read_text().strip().lstrip("#")
+        return (int(hex6[0:2], 16), int(hex6[2:4], 16), int(hex6[4:6], 16))
+    except Exception:
+        return (180, 180, 180)
+
+def set_terminal_color(r, g, b):
+    """Override terminal palette index 2 so cmatrix/tty-clock use the art color."""
+    sys.stdout.write(f"\033]4;2;rgb:{r:02x}/{g:02x}/{b:02x}\033\\")
+    sys.stdout.flush()
+
+def ansi_rgb(r, g, b, brightness, sat_scale=1.0):
+    """True-color ANSI foreground at adjusted brightness/saturation."""
+    h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    nr, ng, nb = colorsys.hsv_to_rgb(h, min(s * sat_scale, 1.0), min(brightness, 1.0))
+    return f"\033[38;2;{int(nr*255)};{int(ng*255)};{int(nb*255)}m"
 
 # Phrases for when no lyrics are found
 NO_LYRICS_PHRASES = [
@@ -380,6 +404,39 @@ def show_music_icon(message=""):
     
     sys.stdout.flush()
 
+def run_cmatrix_fallback(current_title):
+    """Run cmatrix themed to album art color while no lyrics are available."""
+    r, g, b = get_theme_rgb()
+    set_terminal_color(r, g, b)
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+
+    proc = subprocess.Popen(
+        ["cmatrix", "-b", "-u", "4"],
+        stdout=sys.stdout, stderr=subprocess.DEVNULL
+    )
+
+    last_color_check = time.time()
+    try:
+        while True:
+            new_meta = get_metadata()
+            if not new_meta or new_meta["title"] != current_title:
+                break
+            if time.time() - last_color_check > 2:
+                last_color_check = time.time()
+                r, g, b = get_theme_rgb()
+                set_terminal_color(r, g, b)
+            time.sleep(0.1)
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            proc.kill()
+        sys.stdout.write("\033[2J\033[H\033[?25l")
+        sys.stdout.flush()
+
+
 def show_nms_animation(message=None):
     """
     Display a random 'no lyrics' message using nms (No More Secrets) effect.
@@ -466,52 +523,47 @@ def find_current_line(lyrics, position_ms):
 def display_lyrics(lyrics, current_idx, title, artist):
     """Display lyrics centered in terminal with current line highlighted."""
     import shutil as sh
-    
+
     cols, rows = sh.get_terminal_size((80, 24))
-    
+    r, g, b = get_theme_rgb()
+
+    col_current = "\033[1m" + ansi_rgb(r, g, b, brightness=0.92)      # bold album color — active line
+    col_past    = "\033[38;5;250m"                                    # soft white — past lines
+    col_future  = "\033[38;5;240m"                                    # dim white — upcoming lines
+    col_header  = ansi_rgb(r, g, b, brightness=0.70, sat_scale=0.80) # album color — title
+    reset       = "\033[0m"
+
     # Clear screen
     sys.stdout.write("\033[2J\033[H\033[?25l")
-    
+
     # Header
     header = f"{title} - {artist}" if artist else title
     if len(header) > cols - 4:
-        header = header[:cols-7] + "..."
+        header = header[:cols - 7] + "..."
     header_col = (cols - len(header)) // 2
-    sys.stdout.write(f"\033[1;{header_col}H\033[1;38;5;250m{header}\033[0m")
-    
-    # Calculate how many lines we can show
-    available_rows = rows - 4  # Leave room for header and padding
+    sys.stdout.write(f"\033[1;{header_col}H{col_header}{header}{reset}")
+
+    available_rows = rows - 4
     lines_before = available_rows // 2
-    lines_after = available_rows - lines_before - 1
-    
-    # Get the range of lines to display
+    lines_after  = available_rows - lines_before - 1
+
     start_idx = max(0, current_idx - lines_before)
-    end_idx = min(len(lyrics), current_idx + lines_after + 1)
-    
-    # Center vertically
-    start_row = 3
-    
+    end_idx   = min(len(lyrics), current_idx + lines_after + 1)
+
     for i, idx in enumerate(range(start_idx, end_idx)):
         _, text = lyrics[idx]
-        row = start_row + i
-        
-        # Truncate if too long
+        row = 3 + i
         if len(text) > cols - 4:
-            text = text[:cols-7] + "..."
-        
+            text = text[:cols - 7] + "..."
         col = (cols - len(text)) // 2
         sys.stdout.write(f"\033[{row};{col}H")
-        
         if idx == current_idx:
-            # Current line - bold white
-            sys.stdout.write(f"\033[1;37m{text}\033[0m")
+            sys.stdout.write(f"{col_current}{text}{reset}")
         elif idx < current_idx:
-            # Past lines - gray
-            sys.stdout.write(f"\033[38;5;245m{text}\033[0m")
+            sys.stdout.write(f"{col_past}{text}{reset}")
         else:
-            # Future lines - dim
-            sys.stdout.write(f"\033[38;5;240m{text}\033[0m")
-    
+            sys.stdout.write(f"{col_future}{text}{reset}")
+
     sys.stdout.flush()
 
 def run_lyrics_display(lyrics_file, title, artist):
@@ -711,28 +763,9 @@ def main():
                         last_title = None
                         time.sleep(1)
                 else:
-                    # No lyrics found - loop nms animation
-                    log("No lyrics - starting nms loop")
-                    while True:
-                        # Check for song change BEFORE animation
-                        new_meta = get_metadata()
-                        if not new_meta or new_meta['title'] != current_title:
-                            break
-                            
-                        show_nms_animation()
-                        
-                        # Wait a bit to let the user read the text, while checking for song changes
-                        # Wait 2 seconds (20 * 0.1s)
-                        song_changed = False
-                        for _ in range(20):
-                            time.sleep(0.1)
-                            new_meta = get_metadata()
-                            if not new_meta or new_meta['title'] != current_title:
-                                song_changed = True
-                                break
-                        
-                        if song_changed:
-                            break
+                    # No lyrics found - show cmatrix in album art color
+                    log("No lyrics - starting cmatrix fallback")
+                    run_cmatrix_fallback(current_title)
             
             # If in fallback mode (no lyrics found previously), keep showing nms occasionally or just wait
             # But the user wants it to "keep searching for the next song"
